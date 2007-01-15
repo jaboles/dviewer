@@ -1,0 +1,34 @@
+#ifndef CONSTANTS_H_INCLUDED
+#define CONSTANTS_H_INCLUDED
+
+#define BUFFER_SIZE 65536L
+#define SMALL_BUFFER_SIZE 20480L
+
+#define MAX_IDE_CHANNELS 10
+#define MAX_IDE_DRIVES 20
+#define MAX_IDE_DRIVE_MODEL_LENGTH 40
+
+#define MAX_SEARCH_RESULTS 1000
+
+#define DISK_TYPE_FLOPPY 1
+#define DISK_TYPE_IDE 2
+#define DISK_TYPE_SCSI 3
+
+
+// Interrupt Numbers
+#define INT13                          0x13
+
+// Int13 Services
+#define INT13_CONTROLLER_RESET 		0x00
+#define INT13_STD_DISK_READ      	0x02
+#define INT13_STD_DISK_WRITE			0x03
+#define INT13_STD_GET_DISK_PARAMS   0x08
+#define INT13_STD_DISK_SEEK			0x0C
+#define INT13_EXT_INSTALL_CHECK		0x41
+#define INT13_EXT_DISK_READ			0x42
+#define INT13_EXT_DISK_WRITE			0x43
+#define INT13_EXT_DISK_SEEK			0x47
+#define INT13_EXT_GET_DISK_PARAMS	0x48
+
+
+#endif
