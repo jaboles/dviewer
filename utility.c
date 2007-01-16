@@ -1,4 +1,11 @@
+#include <mem.h>
+#include <string.h>
 #include "utility.h"
+#include "globals.h"
+#include "pci_lib.h"
+#include "lowlvl.h"
+#include "ide.h"
+#include "constant.h"
 
 // ============================================================================
 // Name: LBAFromCHS
@@ -84,4 +91,101 @@ BYTE prep(WORD val, int mode)
    if (mode == 3)
       return(v.b.hi);
    return(0);
+}
+
+// ============================================================================
+// Name: EnumerateHardDisks
+// Description: Setup Global Buffers with all Hard Disks Information in System
+// Returns:     WORD - 0 if save was successful
+//                     other if error
+// ============================================================================
+
+int EnumerateHardDisks(int forceCHS)
+{
+    // We need to check the number of drives on the system. But to check that
+    // we need to check the Parameters for the first drive. Query using Standard
+    // means the parameter information for the First Disk.
+    int i;
+    int ideChannelsFound = 0;
+
+    if (pcibios_present() && scan_devices(ideChannels, &ideChannelsFound) >= 0) {
+       // Do ATA IDE detect
+       //printf("%d IDE channels were found.\n", ideChannelsFound); getch();
+       NumberOfIDEDrives = detect_ide_drives(ideChannels, ideChannelsFound, ideDriveList, 0);
+    } else {
+       //printf("Scan for IDE controllers returned: %d\n", ret); getch();
+       NumberOfIDEDrives = 0;
+    }
+
+    // Do BIOS detect
+    NumberOfBIOSDrives = bios_detect(biosDriveList, 0x80, 8, 0);
+    NumberOfFloppyDrives = bios_detect(floppyDriveList, 0x00, 2, 0);
+
+    // If CHS mode is forced on, set the appropriate access mdoe.
+    for (i = 0; i < NumberOfBIOSDrives; i++) {
+        if (forceCHS) {
+            biosDriveList[i].accessMode = ACCESS_MODE_STANDARD;
+        }
+    }
+    return(0);
+}
+
+int PrepareWipeList() {
+   int i, driveCount, j;
+   driveCount = 0;
+   if (HasNonIDEController()) {
+      // Add all the floppy drives to the main list.
+      for (i = 0; i < NumberOfFloppyDrives; i++) {
+         memcpy(&driveList[driveCount], &floppyDriveList[i], sizeof(Drive));
+         driveCount++;
+      }
+      // Add all the drives appearing in the IDE list to the main list.
+      for ( i = 0; i < NumberOfIDEDrives; i++) {
+         memcpy(&driveList[driveCount], &ideDriveList[i], sizeof(Drive));
+         //printf("IDE Drive Model: %s\n", ideDriveList[i].ide.model);
+         //printf("IDE Drive Serial: %s\n", ideDriveList[i].ide.serial_no);
+         driveCount++;
+      }
+      // Add any BIOS list drive that doesn't also appear in the IDE list to the main list.
+      for (i = 0; i < NumberOfBIOSDrives; i++) {
+         for (j = 0; j < NumberOfIDEDrives; j++) {
+            //printf("comparing |%s| with |%s|\n", biosDriveList[i].ide.model, ideDriveList[j].ide.model);
+            //getch();
+            if (biosDriveList[i].type == DISK_TYPE_IDE
+                  && strcmp(biosDriveList[i].ide.model, ideDriveList[j].ide.model) == 0) {
+               break;
+            }
+         }
+         // If we fully iterated thru the drive list and got to the end, we didn't find this bios
+         // drive in the IDE list. So treat it as another drive.
+         if (j == NumberOfIDEDrives) {
+            memcpy(&driveList[driveCount], &biosDriveList[i], sizeof(Drive));
+            driveCount++;
+         }
+      }
+   } else {
+      //printf("\nthere are no non-ide controllers. %d ide and %d bios.\n", NumberOfIDEDrives,NumberOfBIOSDrives); getch();
+      // Add all the floppy drives to the main list.
+      for (i = 0; i < NumberOfFloppyDrives; i++) {
+         memcpy(&driveList[driveCount], &floppyDriveList[i], sizeof(Drive));
+         driveCount++;
+      }
+      if (NumberOfIDEDrives >= NumberOfBIOSDrives) {
+         // There are only IDE drives in the system, and the IDE list
+         // contains more than the BIOS list. Use the IDE list.
+         for (i = 0; i < NumberOfIDEDrives; i++) {
+            memcpy(&driveList[driveCount], &ideDriveList[i], sizeof(Drive));
+            driveCount++;
+         }
+      } else {
+         // There are only IDE drives in the system, and the BIOS list
+         // contains more than the IDE list. Use the BIOS list.
+         for (i = 0; i < NumberOfBIOSDrives; i++) {
+            memcpy(&driveList[driveCount], &biosDriveList[i], sizeof(Drive));
+            driveCount++;
+         }
+      }
+   }
+   //getch();
+   return driveCount;
 }

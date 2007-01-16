@@ -13,10 +13,9 @@
 #include <mem.h>
 
 #include "standard.h"
-#include "constants.h"
-//#include "globals.h"
+#include "constant.h"
 #include "utility.h"
-//#include "ataio.h"
+#include "ataio.h"
 
 // Standard Functions (Non INT13 Extension Functions)
 
@@ -28,7 +27,7 @@
 //                            Other Value Corresponding to register ah.
 // ============================================================================
 
-WORD ControllerReset(WORD drv)
+WORD StandardControllerReset(WORD drv)
 {
     union REGS regs;
     struct SREGS sregs;
@@ -67,11 +66,13 @@ WORD StandardRead(WORD drv,
                   WORD head, 
                   WORD sector,
                   WORD sectorstoread, 
-                  char far * dbuf)
+                  char far *dbuf)
 {
     union REGS regs;
     struct SREGS sregs;
     WORD returncode = 0;
+
+    //printf("entered standardRead\a\n"); getch();
 
     // Zero out memory
     setmem(&regs, sizeof(regs), 0);
@@ -96,8 +97,11 @@ WORD StandardRead(WORD drv,
     sregs.es = FP_SEG(dbuf);
     regs.x.bx = FP_OFF(dbuf);
 
+    //printf("calling interrupt\a\n"); getch();
+
     // Do it
     int86x(INT13, &regs, &regs, &sregs);
+    //printf("returned from interrupt\a\n"); getch();
 
     if (regs.x.cflag != 0)
         returncode = regs.h.ah;
@@ -165,15 +169,14 @@ WORD StandardWrite(WORD drv, WORD cyl, WORD head, WORD sector, WORD sectorstowri
 //                      Other Value Corresponding to register ah.
 // ============================================================================
 
-WORD StandardGetDiskInfo(WORD drive, Drive* driveInfo)
+WORD StandardGetDiskInfo(WORD drive, StdDiskParam *sdp)
 {
     union REGS regs;
     struct SREGS sregs;
-    WORD returncode = 0;
 
     setmem(&regs, sizeof(regs), 0);
     setmem(&sregs, sizeof(sregs), 0);
-    //setmem(&stddiskparam, sizeof(stddiskparam), 0);
+    setmem(sdp, sizeof(StdDiskParam), 0);
 
     regs.h.ah = INT13_STD_GET_DISK_PARAMS;
     regs.h.dl = drive;
@@ -181,20 +184,16 @@ WORD StandardGetDiskInfo(WORD drive, Drive* driveInfo)
 
     if (regs.x.cflag != 0)
     {
-        returncode = regs.h.ah;
+        return regs.h.ah;
     }
     else
     {
-        /*stddiskparam.totalcyl = (prep(regs.h.cl, 3) << 8) ^ regs.h.ch;
-        stddiskparam.totalsect = prep(regs.h.cl,0); // kill the high order stuff from cl
-        stddiskparam.totalhead = regs.h.dh;
-        stddiskparam.totaldrives = regs.h.dl;*/
-        driveInfo->cylinders = (prep(regs.h.cl, 3) << 8) ^ regs.h.ch;
-        driveInfo->heads = regs.h.dh;
-        driveInfo->spt = prep(regs.h.cl,0);
+        sdp->cylinders  = (prep(regs.h.cl, 3) << 8) | regs.h.ch;
+        sdp->spt        = prep(regs.h.cl,0); // kill the high order stuff from cl
+        sdp->heads      = regs.h.dh;
+        sdp->totaldrives = regs.h.dl;
+        return 0;
     }
-
-    return(returncode);
 }
 
 // ============================================================================

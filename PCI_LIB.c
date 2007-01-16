@@ -37,9 +37,6 @@ int pcibios_present(void)
 	     ((pci_signature >> 16) & 0xff) == 'I' &&
 	     ((pci_signature >> 24) & 0xff) == ' ') {
 
-	    /* Indicate to caller that PCI bios present */
-	    ret_status = SUCCESSFUL;
-
 	    /* Extract calling parameters from saved registers */
 		ret_status = LOW_BYTE(cx);
 	 }

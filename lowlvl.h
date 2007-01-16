@@ -5,17 +5,16 @@
 #define LOWLVL_H_INCLUDED
 
 #include "types.h"
-#include "ide.h"
+
+#define HIGH_BYTE(ax) (ax >> 8)
+#define LOW_BYTE(ax) (ax & 0xff)
 
 
-//int get_IDE_info(int drive, ATA_IDENTIFY_DEVICE_Info *buf);
 int scan_devices(IDEChannel far *, int far *);
-void activate_drive(Drive *drive);
-//int numberofIDEdrives(void);
-//unsigned long DMA_IDE_Sectors(int drive, ATA_IDENTIFY_DEVICE_Info *buf);
-//int kill_IDE_max(int drive, ATA_IDENTIFY_DEVICE_Info *buf);
-int bios_detect(Drive* drives, int startId, int maxCount, int driveInfoOffset);
-int do_read(Drive *drive, unsigned long lbahi, unsigned long lbalo, unsigned int sc, char far *bufferPtr);
+int HasNonIDEController(void);
+int bios_detect(Drive* drives, int startId, int maxCount, int offset);
+int bios_ata_identify_device(int diskId, ATA_IDENTIFY_DEVICE_Info *info);
+int get_IDE_info(unsigned int base, int priSec, ATA_IDENTIFY_DEVICE_Info *buf);
 
 
 #endif

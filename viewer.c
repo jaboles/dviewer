@@ -7,7 +7,7 @@
 #include <float.h>
 #include <time.h>
 #include "types.h"
-#include "constants.h"
+#include "constant.h"
 #include "ataio.h"
 #include "ide.h"
 #include "util.h"
@@ -16,6 +16,9 @@
 #include "viewer.h"
 #include "lowlvl.h"
 #include "pci_lib.h"
+#include "globals.h"
+#include "utility.h"
+#include "calcparams.h"
 
 char far *helpText[] = {
    "While Examining Drive:",
@@ -52,8 +55,6 @@ extern int searchResultsModeLineCount[];
 extern int currentSearchResultsMode;
 extern SearchResult far *resultCurrentlySelected;
 
-IDEChannel far *ide_channels;
-Drive far *drives;
 int sd = 0;
 SearchResult far *searchResults = NULL;
 
@@ -68,9 +69,8 @@ int currentOffset;
 
 
 
-int main(int argc, char* argv[]) {
-   int ch, i, searchTermsCount = 0, rc = 0;
-   int ideChannelsFound = 0;
+int main() {
+   int ch, i, j, searchTermsCount = 0, rc = 0;
    int drivesFound = 0;
    int programJustStarted = 1;
 
@@ -93,8 +93,11 @@ int main(int argc, char* argv[]) {
 
    bufferPtr = (unsigned char far *)farmalloc(BUFFER_SIZE);
    diskViewBufferPtr = (unsigned char far *)farmalloc(SMALL_BUFFER_SIZE);
-   ide_channels = (IDEChannel far *)farmalloc(sizeof(IDEChannel) * MAX_IDE_CHANNELS);
-   drives = (Drive far *)farmalloc(sizeof(Drive) * MAX_IDE_DRIVES);
+   ideChannels = (IDEChannel far *)farmalloc(sizeof(IDEChannel) * (MAX_HDD_LIST_SIZE/2));
+   ideDriveList = (Drive far *)farmalloc(sizeof(Drive) * MAX_HDD_LIST_SIZE);
+   biosDriveList = (Drive far *)farmalloc(sizeof(Drive) * MAX_HDD_LIST_SIZE);
+   floppyDriveList = (Drive far *)farmalloc(sizeof(Drive) * 2);
+   driveList = (Drive far *)farmalloc(sizeof(Drive) * (MAX_HDD_LIST_SIZE * 2 + 2));
    for (i = 0; i < MAX_SEARCH_TERMS; i++) {
       searchTerms[i] = (char far *)farmalloc(MAX_SEARCH_TERM_LENGTH);
       memset(searchTerms[i],0,MAX_SEARCH_TERM_LENGTH);
@@ -111,22 +114,34 @@ int main(int argc, char* argv[]) {
 
    header();
    
-   if (!pcibios_present()) {
-      printf("No PCI BIOS found!\n");
-      return -1;
-   } else if (scan_devices(ide_channels, &ideChannelsFound) < 0) {
-      printf("Error scanning for IDE.\n");
-      return -1;
-   }
-
    // Initial parameters for the ATA driver.
    reg_buffer_size = BUFFER_SIZE;
    pio_xfer_width = 32;
 
-   drivesFound = bios_detect(drives, 0x00, 2, 0);
-   //exit(0);
+   EnumerateHardDisks(0);
+   drivesFound = PrepareWipeList();
 
-   drivesFound += detect_ide_drives(ide_channels, ideChannelsFound, drives, drivesFound);
+   printf("enumeration done\n");
+
+   for (i = 0; i < drivesFound; i++) {
+      ActivateDrive(&driveList[i]);
+      printf("activated drive\n");
+      rc = CalculateDiskParams(&driveList[i]);
+      printf("calced drive %d with rc %d\n", i, rc);
+      if (rc == 0xAA || rc == 0x04) {
+         // Added January 2007 JB - An HP Vectra XU 5/133c was near-randomly returning with errors AX=04h
+         // (sector out of range) and AX=AAh (drive not ready) from int 13 calls using extended mode.
+         // If this happens, just drop back to CHS mode.
+         // Switch all the remainng drives to CHS mode (they'll be properly initalised later)
+         for (j = i; j < drivesFound; j++) {
+            if (driveList[j].accessMode == ACCESS_MODE_EXTENDED) driveList[j].accessMode = ACCESS_MODE_STANDARD;
+         }
+         // Now that we've switched the drive to CHS mode, try activating and
+         // calculating its parameters again.
+         ActivateDrive(&driveList[i]);
+         CalculateDiskParams(&driveList[i]);
+      }
+   }
 
    while (1==1) {
       // Get a character from the user. If the program was just launched,
@@ -157,14 +172,14 @@ int main(int argc, char* argv[]) {
          currentOffset = 0;
       } else if (ch == 80 &&  // Down arrow
             (cmp_lba(lastLBAhi, lastLBAlo, currentLBAhi, currentLBAlo) > 0 ||
-            currentOffset < (&drives[sd].bps - displaymodes[currentDisplayMode].bytesPerLine))) {
+            currentOffset < (&driveList[sd].bps - displaymodes[currentDisplayMode].bytesPerLine))) {
          // If we're before the last sector, or if offset is not at the maximum, we can still go forward.
          incrementView(&currentLBAhi, &currentLBAlo, &currentOffset);
       } else if (ch == 81 &&  // Page Down
             (cmp_lba(lastLBAhi, lastLBAlo, currentLBAhi, currentLBAlo) > 0)) {
          // If we're before the last sector, we can go forward one.
          add_lba(&currentLBAhi, &currentLBAlo, 1);
-         
+
       } else if (ch == 118 && (cmp_lba(lastLBAhi, lastLBAlo, currentLBAhi, currentLBAlo) > 0)) {
          // CtrlPgDn: Jump to next sector boundary.
          add_lba(&currentLBAhi, &currentLBAlo, 1);
@@ -183,7 +198,7 @@ int main(int argc, char* argv[]) {
 
       } else if (ch == 60 || programJustStarted > 0) {
          // F2: Select Drive
-         rc = driveSelectionMenu(drives, drivesFound);
+         rc = driveSelectionMenu(driveList, drivesFound);
 
          if (rc < 0 && programJustStarted > 0) {
             // If this is the initial drive selection box (i.e. just after starting
@@ -193,7 +208,7 @@ int main(int argc, char* argv[]) {
             // Otherwise, initialise the drive and reset variables if the user
             // actually selected a drive.
             sd = rc;
-            activate_drive(&drives[sd]);
+            ActivateDrive(&driveList[sd]);
 
             // Reset the current and max LBA variables.
             currentLBAhi = 0;
@@ -201,8 +216,8 @@ int main(int argc, char* argv[]) {
             currentOffset = 0;
             currentSearchLBAhi = 0;
             currentSearchLBAlo = 0;
-            lastLBAhi = drives[sd].lbahi;
-            lastLBAlo = drives[sd].lbalo;
+            lastLBAhi = driveList[sd].realConfig.totalSectorsHi;
+            lastLBAlo = driveList[sd].realConfig.totalSectorsLo;
             // The last LBA is the # of sectors on the drive minus one.
             add_lba(&lastLBAhi, &lastLBAlo, -1);
          }
@@ -225,7 +240,7 @@ int main(int argc, char* argv[]) {
          // F4: go to sector. Prompt the user to enter a sector. If they
          //     type in a number (i.e. sectorPrompt()==0) refresh the display.
          if (sectorPrompt(&currentLBAhi, &currentLBAlo, lastLBAhi, lastLBAlo) >= 0)
-            displayView(&drives[sd], currentLBAhi, currentLBAlo, currentOffset);
+            displayView(&driveList[sd], currentLBAhi, currentLBAlo, currentOffset);
 
       } else if (ch == 63) {
          // F5: Search
@@ -235,9 +250,9 @@ int main(int argc, char* argv[]) {
          } else if (searchTermsCount > 0) {
             if (searchResults != NULL) freeAllSearchResults(searchResults);
             if (rc == 0) {
-               searchResults = startSearch(&drives[sd], searchTerms, 0, 0, &currentSearchLBAhi, &currentSearchLBAlo, MAX_SEARCH_RESULTS);
+               searchResults = startSearch(&driveList[sd], searchTerms, 0, 0, &currentSearchLBAhi, &currentSearchLBAlo, MAX_SEARCH_RESULTS);
             } else if (rc == 1) {
-               searchResults = startSearch(&drives[sd], searchTerms, 0, 0, &currentSearchLBAhi, &currentSearchLBAlo, -1);
+               searchResults = startSearch(&driveList[sd], searchTerms, 0, 0, &currentSearchLBAhi, &currentSearchLBAlo, -1);
             } else {
                fatal("Error","Return code from searchTermsPrompt is an invalid value!");
             }
@@ -255,7 +270,7 @@ int main(int argc, char* argv[]) {
          if (searchTermsCount == 0) {
             domsg("Nothing to search for yet.");
          } else {
-            searchAgain(&drives[sd], 1, searchTerms);
+            searchAgain(&driveList[sd], 1, searchTerms);
          }
 
       } else if (ch == 65) {
@@ -270,7 +285,7 @@ int main(int argc, char* argv[]) {
 
       } else if (ch == 66) {
          // F8: Save sector to disk
-         saveSector(&drives[sd], currentLBAhi, currentLBAlo);
+         saveSector(&driveList[sd], currentLBAhi, currentLBAlo);
 
       } else if (ch == 0) {
          // do nothing
@@ -286,8 +301,11 @@ int main(int argc, char* argv[]) {
    }
    farfree(bufferPtr);
    farfree(diskViewBufferPtr);
-   farfree(drives);
-   farfree(ide_channels);
+   farfree(driveList);
+   farfree(ideDriveList);
+   farfree(biosDriveList);
+   farfree(floppyDriveList);
+   farfree(ideChannels);
    // Set screen colour back to white-on-black and clear screen.
    setcolor(7,0);
    clrscr();
@@ -295,12 +313,12 @@ int main(int argc, char* argv[]) {
 }
 
 void refresh() {
-   displayView(&drives[sd], currentLBAhi, currentLBAlo, currentOffset);
+   displayView(&driveList[sd], currentLBAhi, currentLBAlo, currentOffset);
 }
 
 void incrementView(unsigned long far *lbahi, unsigned long far *lbalo, int far *offset) {
    int incrementAmount = displaymodes[currentDisplayMode].bytesPerLine;
-   if ((*offset + incrementAmount) % drives[sd].bps < incrementAmount) {
+   if ((*offset + incrementAmount) % driveList[sd].bps < incrementAmount) {
       *offset = 0;
       add_lba(lbahi, lbalo, 1);
    } else {
@@ -311,7 +329,7 @@ void incrementView(unsigned long far *lbahi, unsigned long far *lbalo, int far *
 void decrementView(unsigned long far *lbahi, unsigned long far *lbalo, int far *offset) {
    int decrementAmount = displaymodes[currentDisplayMode].bytesPerLine;
    if ((*offset - decrementAmount) < 0) {
-      *offset = drives[sd].bps - decrementAmount;
+      *offset = driveList[sd].bps - decrementAmount;
       add_lba(lbahi, lbalo, -1);
    } else {
       *offset -= decrementAmount;
@@ -371,11 +389,19 @@ int driveSelectionMenu(const Drive far *d, const int drivesFound) {
 
    for (i = 0; i < drivesFound; i++) {
       memset(driveList[i], 0, 60);
-      sprintf(driveList[i], "%10.0lf %10.2f  %-17.17s %-20.20s",
-         (((double)d[i].lbahi)*pow((double)2,(double)32))+(double)d[i].lbalo,
-         (((double)d[i].lbahi)*pow((double)2,(double)32))+(double)d[i].lbalo / 2048.0,
-         (d[i].type==DISK_TYPE_IDE? d[i].ide.model : (d[i].type==DISK_TYPE_FLOPPY? "Floppy" : "<unknown>")),
-         (d[i].type==DISK_TYPE_IDE? d[i].ide.serial_no : ""));
+      if (d[i].type == DISK_TYPE_IDE) {
+         sprintf(driveList[i], "%10.0lf %10.2f  %-17.17s %-20.20s",
+            (((double)d[i].realConfig.totalSectorsHi)*pow((double)2,(double)32))+(double)d[i].realConfig.totalSectorsLo,
+            (((double)d[i].realConfig.totalSectorsHi)*pow((double)2,(double)32))+(double)d[i].realConfig.totalSectorsLo / 2048.0,
+            d[i].ide.model,
+            d[i].ide.serial_no);
+      } else {
+         sprintf(driveList[i], "%10.0lf %10.2f  %s Disk Drive (0x%02X)",
+            (((double)d[i].realConfig.totalSectorsHi)*pow((double)2,(double)32))+(double)d[i].realConfig.totalSectorsLo,
+            (((double)d[i].realConfig.totalSectorsHi)*pow((double)2,(double)32))+(double)d[i].realConfig.totalSectorsLo / 2048.0,
+            d[i].type==DISK_TYPE_FLOPPY? "Floppy" : "Hard",
+            d[i].diskId);
+      }
       driveList[i][61] = '\0';
    }
 
@@ -451,8 +477,8 @@ int sectorPrompt(unsigned long *lbahi, unsigned long *lbalo, unsigned long maxLB
 void displayView(const Drive far *drive, const unsigned long lbahi, const unsigned long lbalo, const int startOffset) {
    static unsigned long cachedLBAhi = 0;
    static unsigned long cachedLBAlo = 0;
-   unsigned long lbacaphi = drive->lbahi;// The drive's capacity (NOT the last LBA)
-   unsigned long lbacaplo = drive->lbalo;
+   unsigned long lbacaphi = drive->realConfig.totalSectorsHi;// The drive's capacity (NOT the last LBA)
+   unsigned long lbacaplo = drive->realConfig.totalSectorsLo;
    int rc, i, j, k, ch;
    long offset = startOffset;
    displaymode *d = &displaymodes[currentDisplayMode];
@@ -497,7 +523,8 @@ void displayView(const Drive far *drive, const unsigned long lbahi, const unsign
    } else {
       // It isn't cached, need to fetch it.
       memset(diskViewBufferPtr, 0, SMALL_BUFFER_SIZE);
-      rc = do_read(drive, lbahi, lbalo, sectorsToRead, diskViewBufferPtr);
+      //rc = do_read(drive, lbahi, lbalo, sectorsToRead, diskViewBufferPtr);
+      rc = LBARead(drive, lbahi, lbalo, sectorsToRead, diskViewBufferPtr, 1);
       if (rc != 0) {
          printf("Read failed with return code: %d\n", rc);
          exit(1);
@@ -558,8 +585,8 @@ SearchResult * startSearch(Drive far *drive, char far *searchTerms[], unsigned l
    unsigned long tmpLBAlo;
    unsigned long cLBAhi = startLBAhi;
    unsigned long cLBAlo = startLBAlo;
-   unsigned long endLBAhi = drive->lbahi;
-   unsigned long endLBAlo = drive->lbalo;
+   unsigned long endLBAhi = drive->realConfig.totalSectorsHi;
+   unsigned long endLBAlo = drive->realConfig.totalSectorsLo;
    //char* blah[] = {"-", "\\", "|", "/"};
    char *blah[] = {"-  *\xF9\xF9", "/  \xF9*\xF9", "|  \xF9\xF9*", "\\  \xF9*\xF9"};
    unsigned char far *bufferPtrStr;
@@ -598,7 +625,8 @@ SearchResult * startSearch(Drive far *drive, char far *searchTerms[], unsigned l
 
       // Read into the buffer
       memset(bufferPtr+bufOffset, 0, sectorsToRead*512);
-      rc = do_read(drive, cLBAhi, cLBAlo, sectorsToRead, bufferPtr+bufOffset);
+      //rc = do_read(drive, cLBAhi, cLBAlo, sectorsToRead, bufferPtr+bufOffset);
+      rc = LBARead(drive, cLBAhi, cLBAlo, sectorsToRead, bufferPtr + bufOffset, 1);
 
       // Copy into the 2nd buffer.
       memcpy(bufferPtrStr+bufOffset, bufferPtr+bufOffset, sectorsToRead*512);
@@ -686,8 +714,8 @@ SearchResult * startSearch(Drive far *drive, char far *searchTerms[], unsigned l
 void searchAgain(Drive far *drive, int viewResultsOrNot, char far *searchTerms[]) {
    SearchResult far *r = NULL, *r2 = NULL;
    int i;
-   unsigned long endLBAhi = drive->lbahi;
-   unsigned long endLBAlo = drive->lbalo;
+   unsigned long endLBAhi = drive->realConfig.totalSectorsHi;
+   unsigned long endLBAlo = drive->realConfig.totalSectorsLo;
 
    add_lba(&endLBAhi, &endLBAlo, -1);
 
@@ -804,7 +832,7 @@ void viewResults(SearchResult *results, SearchResult *startFrom) {
          currentOffset = resultCurrentlySelected->offset / displaymodes[currentDisplayMode].bytesPerLine * displaymodes[currentDisplayMode].bytesPerLine;
          refresh();
       } else if (ch==64) { // F6 key
-         searchAgain(&drives[sd], 0, searchTerms);
+         searchAgain(&driveList[sd], 0, searchTerms);
       }
       printResults(printStartResult, highlightedIndex);
    }
@@ -863,7 +891,8 @@ void saveSector(Drive far *drive, unsigned long lbahi, unsigned long lbalo) {
    entryReturnValue = entry(0);
    killmsg(SECTOR_FILENAME_PROMPT_HANDLE);
    if (entryReturnValue >= 0) {
-      do_read(drive, lbahi, lbalo, 1, bufferPtr);
+      //do_read(drive, lbahi, lbalo, 1, bufferPtr);
+      LBARead(drive, lbahi, lbalo, 1, bufferPtr, 1);
       f = fopen(filename, "wb");
       if (f == NULL) {
          domsg("Couldn't create file. Ensure the disk isn't write-protected.");

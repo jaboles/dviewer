@@ -7,9 +7,155 @@
 typedef unsigned char   BYTE;             // 8 Bit Unsigned Value
 typedef unsigned int    WORD;             // 16 Bit Unsigned Value
 typedef unsigned long   DWORD;            // 32 Bit Unsigned Value
-typedef unsigned char byte;     /* 8-bit  */
-typedef unsigned short word;    /* 16-bit */
-typedef unsigned long dword;    /* 32-bit */
+typedef unsigned char byte;
+typedef unsigned int word;
+typedef unsigned long dword;
+
+typedef struct _QWORD               // 64 Bit Unsigned Value
+{                                   // Actual Value should be calculated as
+    DWORD lowerword;                // upperword + lowerword * 2^32 - 1
+    DWORD upperword;                // although upperword is almost always 0
+} QWORD;
+
+// Structure Definitions
+typedef struct
+{
+    WORD currentsize;
+    WORD allocatedsize;
+    char *dataptr;
+} memorybuf;
+
+typedef struct
+{
+    DWORD Cylinders;
+    DWORD Heads;
+    DWORD Sectors;
+    DWORD totalSectorsHi;
+    DWORD totalSectorsLo;
+    double DiskSize;
+    BYTE PhysicalDetectError;
+    BYTE DMA_Mode;
+} DiskConfig;
+
+typedef struct
+{
+   struct time starttime;
+   struct date startdate;
+   struct time endtime;
+   struct date enddate;
+   int writeerror[3];
+   int readerror[3];
+   int verifyerror[3];
+   int writeretry[3];
+   int readretry[3];
+   int verifyretry[3];
+   int haserror;
+} WipeProcessInfo;
+
+typedef struct _ExtTransferBuffer
+{
+    BYTE    sz;
+    BYTE    reserved;
+    WORD    blocks;
+    char   *buffer;
+    QWORD   startblock;
+} ExtTransferBuffer;
+
+typedef struct _StdDiskParam
+{
+    WORD cylinders;
+    WORD spt;
+    WORD heads;
+    WORD totaldrives;
+} StdDiskParam;
+
+typedef struct _ExtDiskParam
+{
+    WORD  sz;
+    WORD  info;
+    DWORD cyls;
+    DWORD heads;
+    DWORD sectorstrack;
+    QWORD totalsectors;
+    WORD  bytespersector;
+    DWORD edd;
+    WORD  isdevpath;
+    BYTE  sdevpath;
+    BYTE  resdev[3];
+    BYTE  hostbus[4];
+    BYTE  interfacetype[8];
+    BYTE  intpath[8];
+    BYTE  devpath[8];
+    BYTE  resnull;
+    BYTE  chksum;
+    BYTE  reserved[256];   // ensure we don't get a buffer overflow;
+    BYTE  versionsupported;
+} ExtDiskParam;
+
+typedef struct _ExtensionInfo
+{
+    int extensioninstalled;
+    WORD BXregister;
+    BYTE majorversion;
+    WORD apisupportbitmap;
+    BYTE extensionversion;
+} ExtensionInfo;
+
+typedef struct _MyRegPackWordRegs
+{
+    WORD ax;
+    WORD bx;
+    WORD cx;
+    WORD dx;
+    WORD bp;
+    WORD si;
+    WORD di;
+    WORD ds;
+    WORD es;
+    WORD flags;
+} MyRegPackWordRegs;
+
+typedef struct _MyRegPackByteRegs
+{
+    BYTE al;
+    BYTE ah;
+    BYTE bl;
+    BYTE bh;
+    BYTE cl;
+    BYTE ch;
+    BYTE dl;
+    BYTE dh;
+    WORD bp;
+    WORD si;
+    WORD di;
+    WORD ds;
+    WORD es;
+    WORD flags;
+} MyRegPackByteRegs;
+
+
+typedef union _MyRegPack
+{
+    struct REGPACK regs;
+    MyRegPackWordRegs x;
+    MyRegPackByteRegs h;
+} MyRegPack;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 typedef struct IDEChannelInfo {
    int pci_bus;
@@ -25,16 +171,20 @@ typedef struct IDEChannelInfo {
 
 typedef struct DriveInfo {
    int type;
-   int diskId;
-   
-   
-   int cylinders;
-   int heads;
-   int spt;
-   unsigned long lbahi;
-   unsigned long lbalo;
+   int accessMode;
+
+   //unsigned long lbahi;
+   //unsigned long lbalo;
 
    int bps;
+
+   int diskId;
+   StdDiskParam stdParams;
+   ExtDiskParam extParams;
+   ExtensionInfo extInfo;
+   WipeProcessInfo wipeInfo;
+   DiskConfig queriedConfig;
+   DiskConfig realConfig;
 
    union {
       struct {
@@ -130,7 +280,6 @@ typedef struct ATA_IDENTIFY_DEVICE_Infos
    DWORD lba48_totalsectors[2]; // 200
    char resbuf[49];       // 208 - 256
 } ATA_IDENTIFY_DEVICE_Info;
-
 
 
 #endif

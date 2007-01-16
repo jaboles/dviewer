@@ -6,5 +6,7 @@
 DWORD LBAFromCHS(DWORD c, DWORD h, DWORD s, DWORD hpc, DWORD spt);
 void SetCHSFromLBA(DWORD LBA, WORD *Cyl, WORD *Head, WORD *Sec, WORD hpc, WORD spt);
 BYTE prep(WORD val, int mode);
+int EnumerateHardDisks(int);
+int PrepareWipeList(void);
 
 #endif

@@ -2,7 +2,7 @@
 #include <string.h>
 #include <conio.h>
 #include <alloc.h>
-#include "constants.h"
+#include "constant.h"
 #include "util.h"
 #include "uiutils.h"
 #include "search.h"

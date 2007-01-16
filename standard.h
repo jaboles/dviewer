@@ -3,11 +3,11 @@
 
 #include "types.h"
 
-WORD DriveLock(WORD drv, WORD LockDrive);
-WORD ControllerReset(WORD);
-WORD StandardRead(WORD, WORD, WORD, WORD, WORD, char far *);
-WORD StandardWrite(WORD, WORD, WORD, WORD, WORD, char far *);
-WORD StandardGetDiskInfo(WORD, Drive far *driveInfo);
+WORD DriveLock(WORD, WORD LockDrive);
+WORD StandardControllerReset(WORD);
+WORD StandardRead(WORD, WORD, WORD, WORD, WORD, char far *dbuf);
+WORD StandardWrite(WORD, WORD, WORD, WORD, WORD, char far *dbuf);
+WORD StandardGetDiskInfo(WORD, StdDiskParam *);
 WORD StandardSeek(BYTE, DWORD, DWORD, DWORD);
 
 #endif
