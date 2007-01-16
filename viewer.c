@@ -121,13 +121,9 @@ int main() {
    EnumerateHardDisks(0);
    drivesFound = PrepareWipeList();
 
-   printf("enumeration done\n");
-
    for (i = 0; i < drivesFound; i++) {
       ActivateDrive(&driveList[i]);
-      printf("activated drive\n");
       rc = CalculateDiskParams(&driveList[i]);
-      printf("calced drive %d with rc %d\n", i, rc);
       if (rc == 0xAA || rc == 0x04) {
          // Added January 2007 JB - An HP Vectra XU 5/133c was near-randomly returning with errors AX=04h
          // (sector out of range) and AX=AAh (drive not ready) from int 13 calls using extended mode.
